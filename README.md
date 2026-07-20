@@ -7,11 +7,15 @@
 
 把它拆开看看吧！
 
+### 🎮 [点这里，马上开始玩！](https://linearuncle.github.io/pc-teardown-lab/)
+
 ![拆解图](screenshots/explode.png)
 
 ## 怎么开始玩
 
-不用安装任何东西：
+**最简单**：直接打开在线版 👉 https://linearuncle.github.io/pc-teardown-lab/
+
+也可以下载到自己电脑上玩，不用安装任何东西：
 
 1. 下载这个项目（点绿色的 **Code** 按钮 → **Download ZIP**，然后解压）
 2. 双击 `index.html`，就能在浏览器里玩了
