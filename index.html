@@ -168,6 +168,25 @@
   }
   #hint-drag{font:500 12px inherit; color:var(--ink-dim); letter-spacing:.05em;}
 
+  /* 拆解引导气泡:提示小朋友滑块可以拆解 */
+  #explode-hint{
+    display:none; position:relative; font:700 14px inherit; color:#1a1206;
+    background:var(--copper); padding:9px 18px; border-radius:12px;
+    box-shadow:0 6px 20px rgba(224,168,63,.35);
+    animation:bob 1.3s ease-in-out infinite;
+  }
+  #explode-hint::after{
+    content:""; position:absolute; left:50%; bottom:-7px; transform:translateX(-50%);
+    border:8px solid transparent; border-top-color:var(--copper); border-bottom:none;
+  }
+  body.hint-on #explode-hint{display:block;}
+  body.hint-on #explode::-webkit-slider-thumb{animation:thumbPulse 1.3s ease-in-out infinite;}
+  @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+  @keyframes thumbPulse{
+    0%,100%{box-shadow:0 0 0 1.5px var(--copper);}
+    50%{box-shadow:0 0 0 12px rgba(224,168,63,.28), 0 0 0 1.5px var(--copper);}
+  }
+
   /* 信息卡 */
   #card{
     position:fixed; left:20px; top:50%; transform:translateY(-50%) translateX(-16px);
@@ -261,6 +280,8 @@
   @media (prefers-reduced-motion: reduce){
     .blades{animation:none;}
     .box.good .face,.box.bad .face{animation:none;}
+    #explode-hint{animation:none;}
+    body.hint-on #explode::-webkit-slider-thumb{animation:none;}
     *{transition-duration:.01s !important;}
   }
 </style>
@@ -295,6 +316,7 @@
 <div id="tip"></div>
 
 <footer id="bottombar">
+  <div id="explode-hint">🔧 拖一拖下面的滑块，把电脑拆开看看！</div>
   <div id="chips"></div>
   <div id="slider-row">
     <label for="explode">🔧 拆解</label>
@@ -523,7 +545,12 @@ function setExplode(v){
   slider.style.setProperty("--fill", v+"%");
   layout();
 }
-slider.addEventListener("input", ()=>{ lastInteract = performance.now(); setExplode(+slider.value); });
+slider.addEventListener("input", ()=>{
+  lastInteract = performance.now();
+  setExplode(+slider.value);
+  dismissHint();
+});
+function dismissHint(){ document.body.classList.remove("hint-on"); }
 
 /* 悬浮名牌 */
 const tip = document.getElementById("tip");
@@ -596,6 +623,7 @@ function startQuiz(){
   qOrder = [...QUIZ].sort(()=>Math.random()-.5);
   qIdx = 0; score = 0; scoreEl.textContent = 0;
   card.classList.remove("show"); selectComp(null);
+  dismissHint();
   if(explodeT < .5) setExplode(60);
   nextQuestion();
 }
@@ -667,11 +695,8 @@ btnQ.addEventListener("click", ()=>setMode("quiz"));
 document.getElementById("btn-start").addEventListener("click", ()=>{
   document.getElementById("intro").classList.add("hide");
   sndPick();
-  // 开场动画:自动缓缓拆开一点
-  if(!reduceMotion){
-    let v = 0;
-    const t = setInterval(()=>{ v += 3; setExplode(v); if(v>=45) clearInterval(t); }, 24);
-  } else setExplode(45);
+  // 默认不拆解,用引导气泡告诉小朋友滑块可以拆
+  document.body.classList.add("hint-on");
 });
 document.getElementById("btn-again").addEventListener("click", ()=>{
   document.getElementById("result").classList.add("hide");
