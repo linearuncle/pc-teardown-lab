@@ -1,0 +1,670 @@
+<title>电脑拆解实验室</title>
+<style>
+  :root{
+    --bg0:#0c131e; --bg1:#152234;
+    --ink:#f2ede2; --ink-dim:#9aa7b8;
+    --copper:#e0a83f; --copper-deep:#a97a25;
+    --pcb:#2a7a5a; --good:#58c48a; --bad:#d96a5b;
+    --panel:rgba(16,26,40,.88); --line:rgba(224,168,63,.28);
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{height:100%; overflow:hidden;}
+  body{
+    font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;
+    color:var(--ink);
+    background:
+      radial-gradient(1200px 700px at 70% -10%, #1d3049 0%, transparent 60%),
+      radial-gradient(900px 600px at 10% 110%, #12253a 0%, transparent 55%),
+      linear-gradient(160deg, var(--bg1), var(--bg0));
+    user-select:none; -webkit-user-select:none;
+  }
+  .mono{font-family:ui-monospace,"SF Mono",Menlo,monospace;}
+
+  /* ---------- 3D 舞台 ---------- */
+  #stage{
+    position:fixed; inset:0; perspective:1500px; cursor:grab; touch-action:none;
+    background-image:
+      repeating-linear-gradient(0deg, rgba(224,168,63,.035) 0 1px, transparent 1px 56px),
+      repeating-linear-gradient(90deg, rgba(224,168,63,.035) 0 1px, transparent 1px 56px);
+  }
+  #stage.dragging{cursor:grabbing;}
+  #world{
+    position:absolute; left:50%; top:52%; width:0; height:0;
+    transform-style:preserve-3d;
+  }
+  .box{position:absolute; left:0; top:0; transform-style:preserve-3d; cursor:pointer;}
+  .face{
+    position:absolute; left:50%; top:50%;
+    backface-visibility:hidden;
+    transition:filter .25s;
+  }
+  .box.sel .face{filter:brightness(1.35) saturate(1.15);}
+  .box.good .face{animation:flashGood .7s;}
+  .box.bad .face{animation:flashBad .5s;}
+  @keyframes flashGood{
+    0%,100%{filter:none} 30%,70%{filter:brightness(1.7) sepia(.4) hue-rotate(60deg) saturate(2);}
+  }
+  @keyframes flashBad{
+    0%,100%{filter:none} 25%,75%{filter:brightness(1.4) sepia(.6) hue-rotate(-30deg) saturate(3);}
+  }
+
+  /* ---------- 零件表面纹理 ---------- */
+  .tex-mobo{
+    background-image:
+      repeating-linear-gradient(90deg, rgba(224,168,63,.22) 0 2px, transparent 2px 34px),
+      repeating-linear-gradient(0deg, rgba(224,168,63,.16) 0 2px, transparent 2px 46px),
+      radial-gradient(circle at 18% 22%, rgba(0,0,0,.35) 0 9px, transparent 10px),
+      radial-gradient(circle at 82% 78%, rgba(0,0,0,.35) 0 9px, transparent 10px);
+  }
+  .tex-cpu{
+    background-image:
+      linear-gradient(135deg, rgba(255,255,255,.28), transparent 55%),
+      repeating-linear-gradient(0deg, rgba(0,0,0,.14) 0 2px, transparent 2px 8px),
+      repeating-linear-gradient(90deg, rgba(0,0,0,.14) 0 2px, transparent 2px 8px);
+  }
+  .tex-cpu::after{
+    content:"CPU"; position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    font:800 15px ui-monospace,monospace; color:#4a3510; letter-spacing:.12em;
+  }
+  .tex-fan{
+    background-image:radial-gradient(circle at 50% 50%, rgba(0,0,0,.45) 0 44%, transparent 45%);
+    overflow:hidden;
+  }
+  .blades{
+    position:absolute; left:50%; top:50%; width:82%; aspect-ratio:1; border-radius:50%;
+    transform:translate(-50%,-50%);
+    background:
+      radial-gradient(circle at 50% 50%, #d8b25a 0 16%, transparent 17%),
+      repeating-conic-gradient(from 0deg, rgba(214,222,232,.9) 0deg 34deg, rgba(30,40,55,.9) 34deg 90deg);
+    animation:spin 1.1s linear infinite;
+  }
+  @keyframes spin{to{transform:translate(-50%,-50%) rotate(360deg);}}
+  .tex-ram{
+    background-image:
+      repeating-linear-gradient(0deg, rgba(0,0,0,.28) 0 14px, transparent 14px 24px),
+      linear-gradient(to bottom, transparent 82%, #d8ad4a 82% 100%);
+  }
+  .tex-gpu{
+    background-image:
+      radial-gradient(circle at 28% 50%, rgba(0,0,0,.5) 0 17px, rgba(180,190,205,.5) 17px 19px, transparent 20px),
+      radial-gradient(circle at 72% 50%, rgba(0,0,0,.5) 0 17px, rgba(180,190,205,.5) 17px 19px, transparent 20px),
+      linear-gradient(120deg, rgba(255,255,255,.14), transparent 50%);
+  }
+  .tex-gpu::after{
+    content:"GPU"; position:absolute; right:8px; top:4px;
+    font:800 11px ui-monospace,monospace; color:rgba(255,255,255,.75); letter-spacing:.14em;
+  }
+  .tex-ssd::after{
+    content:"SSD"; position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    font:800 14px ui-monospace,monospace; color:rgba(255,255,255,.85); letter-spacing:.2em;
+  }
+  .tex-psu{
+    background-image:radial-gradient(circle, rgba(0,0,0,.5) 0 2.5px, transparent 3px);
+    background-size:11px 11px; background-position:center;
+  }
+  .tex-psu::after{
+    content:"POWER"; position:absolute; left:0; right:0; bottom:5px; text-align:center;
+    font:800 10px ui-monospace,monospace; color:#e8c26a; letter-spacing:.22em;
+  }
+
+  /* ---------- HUD ---------- */
+  #topbar{
+    position:fixed; top:0; left:0; right:0; z-index:20;
+    display:flex; align-items:center; gap:16px; padding:14px 20px;
+    background:linear-gradient(to bottom, rgba(10,16,26,.92), rgba(10,16,26,0));
+    pointer-events:none;
+  }
+  #topbar > *{pointer-events:auto;}
+  h1{font-size:19px; font-weight:800; letter-spacing:.04em;}
+  h1 .zi{color:var(--copper);}
+  #modes{display:flex; gap:8px; margin-left:auto;}
+  .mode-btn{
+    font:600 14px inherit; font-family:inherit; color:var(--ink-dim);
+    background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.12);
+    border-radius:999px; padding:8px 18px; cursor:pointer; transition:.2s;
+  }
+  .mode-btn:hover{color:var(--ink);}
+  .mode-btn.on{color:#1a1206; background:var(--copper); border-color:var(--copper); font-weight:700;}
+  .mode-btn:focus-visible, button:focus-visible, input:focus-visible{outline:2px solid var(--copper); outline-offset:2px;}
+  #score-pill{
+    display:none; font:700 14px ui-monospace,monospace; color:var(--copper);
+    border:1px solid var(--line); border-radius:999px; padding:8px 16px; background:var(--panel);
+  }
+  body[data-mode="quiz"] #score-pill{display:block;}
+
+  /* 底部控制条 */
+  #bottombar{
+    position:fixed; left:0; right:0; bottom:0; z-index:20;
+    display:flex; flex-direction:column; align-items:center; gap:10px; padding:0 16px 16px;
+    background:linear-gradient(to top, rgba(10,16,26,.9), rgba(10,16,26,0));
+    pointer-events:none;
+  }
+  #bottombar > *{pointer-events:auto;}
+  #chips{display:flex; flex-wrap:wrap; justify-content:center; gap:6px; max-width:720px;}
+  .chip{
+    font:600 12px inherit; color:var(--ink-dim); padding:5px 12px; border-radius:999px;
+    border:1px solid rgba(255,255,255,.14); background:rgba(255,255,255,.04); transition:.3s;
+  }
+  .chip.found{color:#1a1206; background:var(--copper); border-color:var(--copper); font-weight:700;}
+  body[data-mode="quiz"] #chips{display:none;}
+  #slider-row{display:flex; align-items:center; gap:12px; width:min(420px,86vw);}
+  #slider-row label{font:600 13px inherit; color:var(--ink-dim); white-space:nowrap;}
+  #explode{
+    flex:1; appearance:none; height:4px; border-radius:2px;
+    background:linear-gradient(90deg, var(--copper) var(--fill,0%), rgba(255,255,255,.15) var(--fill,0%));
+    cursor:pointer;
+  }
+  #explode::-webkit-slider-thumb{
+    appearance:none; width:20px; height:20px; border-radius:50%;
+    background:var(--copper); border:3px solid #0c131e; box-shadow:0 0 0 1.5px var(--copper);
+  }
+  #hint-drag{font:500 12px inherit; color:var(--ink-dim); letter-spacing:.05em;}
+
+  /* 信息卡 */
+  #card{
+    position:fixed; left:20px; top:50%; transform:translateY(-50%) translateX(-16px);
+    width:min(320px, calc(100vw - 40px)); z-index:15;
+    background:var(--panel); border:1px solid var(--line); border-radius:14px;
+    padding:20px 22px; backdrop-filter:blur(10px);
+    opacity:0; pointer-events:none; transition:opacity .25s, transform .25s;
+  }
+  #card.show{opacity:1; pointer-events:auto; transform:translateY(-50%) translateX(0);}
+  #card .eyebrow{
+    font:700 11px ui-monospace,monospace; color:var(--copper); letter-spacing:.22em; margin-bottom:8px;
+  }
+  #card h2{font-size:22px; font-weight:800; margin-bottom:2px;}
+  #card .en{font:600 12px ui-monospace,monospace; color:var(--ink-dim); letter-spacing:.08em; margin-bottom:12px;}
+  #card .tag{
+    display:inline-block; font-size:12px; font-weight:700; color:var(--copper);
+    border:1px solid var(--line); border-radius:6px; padding:3px 9px; margin-bottom:12px;
+  }
+  #card p{font-size:14px; line-height:1.75; color:#d8dde4;}
+  #card .fact{
+    margin-top:12px; padding-top:12px; border-top:1px dashed rgba(224,168,63,.3);
+    font-size:12.5px; line-height:1.7; color:var(--ink-dim);
+  }
+  #card .fact b{color:var(--copper); font-weight:700;}
+  #card .close{
+    position:absolute; right:10px; top:10px; width:26px; height:26px; border-radius:50%;
+    border:none; background:rgba(255,255,255,.08); color:var(--ink-dim);
+    font-size:14px; cursor:pointer; line-height:1;
+  }
+  #card .close:hover{color:var(--ink);}
+
+  /* 挑战题卡 */
+  #quiz-card{
+    position:fixed; left:50%; top:66px; transform:translateX(-50%); z-index:15;
+    width:min(460px, calc(100vw - 32px));
+    background:var(--panel); border:1px solid var(--line); border-radius:14px;
+    padding:16px 20px; backdrop-filter:blur(10px); text-align:center;
+    display:none;
+  }
+  body[data-mode="quiz"] #quiz-card{display:block;}
+  #quiz-card .qnum{font:700 11px ui-monospace,monospace; color:var(--copper); letter-spacing:.22em; margin-bottom:6px;}
+  #quiz-card .clue{font-size:15.5px; font-weight:600; line-height:1.7;}
+  #quiz-card .feedback{font-size:13px; margin-top:8px; min-height:1.4em; color:var(--ink-dim);}
+  #quiz-card .feedback.ok{color:var(--good); font-weight:700;}
+  #quiz-card .feedback.no{color:var(--bad); font-weight:700;}
+
+  /* 悬浮名牌 */
+  #tip{
+    position:fixed; z-index:30; pointer-events:none; display:none;
+    font:700 13px inherit; color:#1a1206; background:var(--copper);
+    padding:5px 12px; border-radius:8px; white-space:nowrap;
+    transform:translate(14px, -34px);
+    box-shadow:0 4px 16px rgba(0,0,0,.4);
+  }
+
+  /* 遮罩层(开场/结算) */
+  .overlay{
+    position:fixed; inset:0; z-index:50; display:flex; align-items:center; justify-content:center;
+    background:rgba(8,13,21,.78); backdrop-filter:blur(8px);
+    opacity:1; transition:opacity .4s;
+  }
+  .overlay.hide{opacity:0; pointer-events:none;}
+  .overlay .panel{
+    width:min(520px, calc(100vw - 40px)); text-align:center;
+    background:var(--panel); border:1px solid var(--line); border-radius:18px;
+    padding:40px 36px 32px;
+  }
+  .overlay .eyebrow{font:700 12px ui-monospace,monospace; color:var(--copper); letter-spacing:.3em; margin-bottom:14px;}
+  .overlay h2{font-size:30px; font-weight:800; letter-spacing:.03em; margin-bottom:14px; text-wrap:balance;}
+  .overlay h2 .zi{color:var(--copper);}
+  .overlay p{font-size:14.5px; line-height:1.85; color:#c9d1db; margin-bottom:8px;}
+  .howto{display:flex; justify-content:center; gap:22px; margin:22px 0 26px; flex-wrap:wrap;}
+  .howto div{font-size:13px; color:var(--ink-dim); line-height:1.6;}
+  .howto b{display:block; font-size:22px; margin-bottom:4px;}
+  .big-btn{
+    font:700 16px inherit; font-family:inherit; color:#1a1206; background:var(--copper);
+    border:none; border-radius:12px; padding:14px 42px; cursor:pointer;
+    box-shadow:0 6px 24px rgba(224,168,63,.35); transition:transform .15s;
+  }
+  .big-btn:hover{transform:translateY(-2px);}
+  #result-rank{font-size:44px; margin-bottom:6px;}
+  #result-score{font:800 20px ui-monospace,monospace; color:var(--copper); margin-bottom:14px;}
+
+  @media (max-width:640px){
+    #card{left:12px; right:12px; top:auto; bottom:120px; transform:none; width:auto;}
+    #card.show{transform:none;}
+    h1{font-size:16px;}
+    .mode-btn{padding:7px 13px; font-size:13px;}
+    #hint-drag{display:none;}
+  }
+  @media (prefers-reduced-motion: reduce){
+    .blades{animation:none;}
+    .box.good .face,.box.bad .face{animation:none;}
+    *{transition-duration:.01s !important;}
+  }
+</style>
+
+<div id="stage"><div id="world"></div></div>
+
+<header id="topbar">
+  <h1>电脑拆解<span class="zi">实验室</span></h1>
+  <div id="score-pill">得分 <span id="score">0</span> / 8</div>
+  <nav id="modes">
+    <button class="mode-btn on" id="btn-explore">🔍 探索模式</button>
+    <button class="mode-btn" id="btn-quiz">🎯 挑战模式</button>
+  </nav>
+</header>
+
+<aside id="card">
+  <button class="close" id="card-close" aria-label="关闭">✕</button>
+  <div class="eyebrow" id="c-eyebrow">PART 01</div>
+  <h2 id="c-name">CPU 中央处理器</h2>
+  <div class="en mono" id="c-en">CPU</div>
+  <div class="tag" id="c-tag">🧠 电脑的大脑</div>
+  <p id="c-desc"></p>
+  <div class="fact"><b>冷知识</b> · <span id="c-fact"></span></div>
+</aside>
+
+<div id="quiz-card">
+  <div class="qnum">第 <span id="q-num">1</span> / 8 题</div>
+  <div class="clue" id="q-clue"></div>
+  <div class="feedback" id="q-feedback">在 3D 模型里点击你认为正确的零件</div>
+</div>
+
+<div id="tip"></div>
+
+<footer id="bottombar">
+  <div id="chips"></div>
+  <div id="slider-row">
+    <label for="explode">🔧 拆解</label>
+    <input type="range" id="explode" min="0" max="100" value="0">
+    <span id="hint-drag">🖱 拖拽旋转 · 滚轮缩放</span>
+  </div>
+</footer>
+
+<div class="overlay" id="intro">
+  <div class="panel">
+    <div class="eyebrow">COMPUTER LAB · 互动课堂</div>
+    <h2>一台电脑的<span class="zi">身体</span>里有什么？</h2>
+    <p>电脑不是一个神秘的黑盒子——它是 8 个零件组成的小团队：有大脑、有记忆、有心脏，还有画家。<br>把它拆开看看吧！</p>
+    <div class="howto">
+      <div><b>🖐</b>拖拽旋转机器</div>
+      <div><b>🔧</b>滑块拆解零件</div>
+      <div><b>👆</b>点击零件学知识</div>
+    </div>
+    <button class="big-btn" id="btn-start">开始拆解 →</button>
+  </div>
+</div>
+
+<div class="overlay hide" id="result">
+  <div class="panel">
+    <div class="eyebrow">CHALLENGE COMPLETE</div>
+    <div id="result-rank">🏆</div>
+    <h2 id="result-title">装机大师！</h2>
+    <div id="result-score" class="mono">8 / 8</div>
+    <p id="result-msg"></p>
+    <button class="big-btn" id="btn-again">再玩一次</button>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* ================= 数据 ================= */
+const PARTS = [
+  { id:"case", name:"机箱", en:"Computer Case", tag:"🏠 大家的房子", color:"#3b4b60",
+    desc:"机箱是所有零件共同的家：挡住灰尘、防止磕碰，把每个零件都牢牢固定在自己的位置上，还负责组织风道让热气排出去。",
+    fact:"很多玩家会给机箱装上透明侧板和彩灯，把电脑内部变成一个小展览馆。" },
+  { id:"mobo", name:"主板", en:"Motherboard", tag:"🛣 城市的道路", color:"#2a7a5a",
+    desc:"主板是一块布满金色电路的大板子，就像一座城市的道路网。CPU、内存、显卡……所有零件都插在它身上，靠它互相传递信息。",
+    fact:"主板上那些金色细线叫「铜箔走线」，一块主板上的走线连起来可以有<b>几百米</b>长。" },
+  { id:"cpu", name:"CPU 处理器", en:"Central Processing Unit", tag:"🧠 电脑的大脑", color:"#d8b25a",
+    desc:"CPU 是电脑的大脑，你点的每一下鼠标、算的每一道题，最终都变成 CPU 里亿万次的计算。它越强，电脑反应越快。",
+    fact:"一块指甲盖大小的 CPU 里装着<b>上百亿个晶体管</b>，每个都比病毒还小。" },
+  { id:"cooler", name:"散热风扇", en:"CPU Cooler", tag:"❄️ 随身小空调", color:"#5b697d",
+    desc:"CPU 一干活就会发烫，温度太高会「烧糊涂」甚至罢工。散热器像个小空调，用金属吸走热量、再用风扇吹散，让大脑保持冷静。",
+    fact:"顶级 CPU 满负荷时的每平方厘米发热量,比电磁炉还高——所以散热真不是可有可无。" },
+  { id:"ram", name:"内存", en:"RAM · Random Access Memory", tag:"📝 临时工作台", color:"#3d8f6f",
+    desc:"内存是 CPU 的工作台：正在玩的游戏、正在写的作业都先摊在这里，存取速度飞快。但它是「短期记忆」——一断电就全部忘光。",
+    fact:"所以写作业一定要点「保存」：保存就是把桌面上的东西<b>搬进硬盘这个书柜</b>里。" },
+  { id:"gpu", name:"显卡", en:"GPU · Graphics Card", tag:"🎨 拼命的画家", color:"#7a4b8f",
+    desc:"屏幕上的每一帧画面都是显卡画出来的。玩游戏时它每秒要画几十上百张图；它有成千上万个小核心一起干活，特别擅长同时算很多事。",
+    fact:"正因为擅长「一起算」，训练 <b>AI（比如我）</b>用的主力芯片就是 GPU。" },
+  { id:"ssd", name:"硬盘", en:"SSD · Solid State Drive", tag:"📚 长期书柜", color:"#4a5a72",
+    desc:"硬盘是电脑的长期记忆：照片、游戏、系统都住在这里，断电也不会丢。需要用时，再把内容搬到内存这个工作台上。",
+    fact:"现在的固态硬盘没有任何转动的零件，一块口香糖大小就能装下<b>几十万张照片</b>。" },
+  { id:"psu", name:"电源", en:"PSU · Power Supply Unit", tag:"🍚 全家的食堂", color:"#33404f",
+    desc:"电源是全机的食堂：把插座里的高压交流电，变成每个零件爱吃的低压直流电，按需分配给大脑、画家和所有伙伴。",
+    fact:"电源不稳会让整台电脑莫名重启——所以装机老手都说：<b>电源千万不能省钱</b>。" },
+];
+const QUIZ = [
+  { id:"cpu",    clue:"我是电脑的大脑，你点的每一下鼠标最后都变成我的计算。我是谁？" },
+  { id:"ram",    clue:"我是临时工作台，速度飞快，但一断电就把东西全忘光。我是谁？" },
+  { id:"ssd",    clue:"照片、游戏、作业都长期存在我这里，断电也不丢。我是谁？" },
+  { id:"gpu",    clue:"我是画家，玩游戏时每秒要画上百张图，练 AI 也靠我。我是谁？" },
+  { id:"mobo",   clue:"我是城市的道路，所有零件都插在我身上、靠我互相传话。我是谁？" },
+  { id:"psu",    clue:"我是全家的食堂，把插座的电变成每个零件爱吃的「饭」。我是谁？" },
+  { id:"cooler", clue:"大脑一干活就发烧，我负责给它吹风降温。我是谁？" },
+  { id:"case",   clue:"我是大家的房子，挡灰尘、防磕碰，把零件牢牢固定住。我是谁？" },
+];
+const partById = Object.fromEntries(PARTS.map(p=>[p.id,p]));
+
+/* ================= 3D 几何 ================= */
+const world = document.getElementById("world");
+const boxes = [];               // {el, x,y,z, ex,ey,ez}
+const compBoxes = {};           // id -> [el]
+
+function shade(hex, f){
+  const n = parseInt(hex.slice(1),16);
+  const c = v => Math.max(0, Math.min(255, Math.round(v*f)));
+  return `rgb(${c(n>>16)},${c(n>>8&255)},${c(n&255)})`;
+}
+const LIGHT = {front:.98, back:.5, right:.82, left:.66, top:1.14, bottom:.45};
+
+function addBox(comp, o){
+  const el = document.createElement("div");
+  el.className = "box"; el.dataset.comp = comp;
+  const faces = {
+    front:[o.w,o.h,`translateZ(${o.d/2}px)`],
+    back:[o.w,o.h,`rotateY(180deg) translateZ(${o.d/2}px)`],
+    right:[o.d,o.h,`rotateY(90deg) translateZ(${o.w/2}px)`],
+    left:[o.d,o.h,`rotateY(-90deg) translateZ(${o.w/2}px)`],
+    top:[o.w,o.d,`rotateX(90deg) translateZ(${o.h/2}px)`],
+    bottom:[o.w,o.d,`rotateX(-90deg) translateZ(${o.h/2}px)`],
+  };
+  for(const [side,[fw,fh,tf]] of Object.entries(faces)){
+    const f = document.createElement("div");
+    f.className = "face";
+    f.style.width = fw+"px"; f.style.height = fh+"px";
+    f.style.marginLeft = -fw/2+"px"; f.style.marginTop = -fh/2+"px";
+    f.style.transform = tf;
+    f.style.backgroundColor = shade(o.color, LIGHT[side]);
+    const tex = o.tex && o.tex[side];
+    if(tex){
+      tex.split(" ").forEach(c=>f.classList.add(c));
+      if(tex.includes("tex-fan")){
+        const b = document.createElement("div"); b.className = "blades"; f.appendChild(b);
+      }
+    }
+    el.appendChild(f);
+  }
+  Object.assign(el.dataset,{});
+  const rec = {el, x:o.x, y:o.y, z:o.z, ex:o.ex||0, ey:o.ey||0, ez:o.ez||0};
+  boxes.push(rec);
+  (compBoxes[comp] ||= []).push(el);
+  world.appendChild(el);
+  return rec;
+}
+
+function buildScene(){
+  const cc = partById.case.color;
+  // 机箱:背板 + 上下横梁 + 左右立柱(正面敞开)
+  addBox("case",{w:330,h:400,d:10, x:0,y:0,z:-22, ez:-170, color:cc});
+  addBox("case",{w:330,h:16,d:130, x:0,y:-208,z:38, ey:-150, color:cc});
+  addBox("case",{w:330,h:16,d:130, x:0,y:208,z:38,  ey:150,  color:cc});
+  addBox("case",{w:16,h:432,d:130, x:-173,y:0,z:38, ex:-160, color:cc});
+  addBox("case",{w:16,h:432,d:130, x:173,y:0,z:38,  ex:160,  color:cc});
+  // 主板
+  addBox("mobo",{w:280,h:330,d:12, x:0,y:-10,z:0, color:partById.mobo.color,
+    tex:{front:"tex-mobo"}});
+  // CPU + 散热
+  addBox("cpu",{w:64,h:64,d:10, x:-45,y:-95,z:11, ex:-10,ey:-20,ez:150, color:partById.cpu.color,
+    tex:{front:"tex-cpu"}});
+  addBox("cooler",{w:96,h:96,d:34, x:-45,y:-95,z:33, ex:-10,ey:-55,ez:265, color:partById.cooler.color,
+    tex:{front:"tex-fan"}});
+  // 内存两条
+  addBox("ram",{w:13,h:160,d:42, x:58,y:-90,z:27, ex:60,ey:-25,ez:80, color:partById.ram.color,
+    tex:{right:"tex-ram", left:"tex-ram"}});
+  addBox("ram",{w:13,h:160,d:42, x:86,y:-90,z:27, ex:95,ey:-25,ez:110, color:partById.ram.color,
+    tex:{right:"tex-ram", left:"tex-ram"}});
+  // 显卡
+  addBox("gpu",{w:232,h:42,d:46, x:-8,y:55,z:29, ey:95,ez:150, color:partById.gpu.color,
+    tex:{front:"tex-gpu"}});
+  // 硬盘
+  addBox("ssd",{w:92,h:60,d:9, x:96,y:8,z:11, ex:135,ey:20,ez:70, color:partById.ssd.color,
+    tex:{front:"tex-ssd"}});
+  // 电源
+  addBox("psu",{w:140,h:88,d:96, x:-72,y:152,z:26, ex:-110,ey:95,ez:60, color:partById.psu.color,
+    tex:{front:"tex-psu"}});
+}
+buildScene();
+
+/* ================= 相机与渲染 ================= */
+const stage = document.getElementById("stage");
+const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+let rx = -14, ry = -26, zoom = 1, explodeT = 0;
+let lastInteract = 0;
+
+function fitScale(){
+  return Math.min(innerWidth/820, innerHeight/860, 1);
+}
+function render(){
+  world.style.transform = `scale(${(fitScale()*zoom).toFixed(3)}) rotateX(${rx}deg) rotateY(${ry}deg)`;
+}
+function layout(){
+  for(const b of boxes){
+    b.el.style.transform =
+      `translate3d(${b.x + b.ex*explodeT}px, ${b.y + b.ey*explodeT}px, ${b.z + b.ez*explodeT}px)`;
+  }
+}
+layout(); render();
+addEventListener("resize", render);
+
+/* 拖拽旋转 */
+let dragging = false, px=0, py=0, downX=0, downY=0;
+
+// 空闲时缓慢自转
+(function idle(){
+  requestAnimationFrame(idle);
+  if(!reduceMotion && performance.now() - lastInteract > 4000 && !dragging){
+    ry += 0.08; render();
+  }
+})();
+stage.addEventListener("pointerdown", e=>{
+  dragging = true; px = downX = e.clientX; py = downY = e.clientY;
+  stage.classList.add("dragging");
+  stage.setPointerCapture(e.pointerId);
+  lastInteract = performance.now();
+});
+stage.addEventListener("pointermove", e=>{
+  lastInteract = performance.now();
+  if(dragging){
+    ry += (e.clientX-px)*0.35;
+    rx = Math.max(-80, Math.min(40, rx + (e.clientY-py)*0.3));
+    px = e.clientX; py = e.clientY;
+    render(); hideTip();
+  }else{
+    const box = e.target.closest?.(".box");
+    if(box) showTip(partById[box.dataset.comp].name, e.clientX, e.clientY);
+    else hideTip();
+  }
+});
+stage.addEventListener("pointerup", e=>{
+  dragging = false; stage.classList.remove("dragging");
+  if(Math.hypot(e.clientX-downX, e.clientY-downY) < 7){
+    const box = e.target.closest?.(".box");
+    if(box) onPick(box.dataset.comp);
+  }
+});
+stage.addEventListener("pointercancel", ()=>{ dragging=false; stage.classList.remove("dragging"); });
+stage.addEventListener("wheel", e=>{
+  e.preventDefault();
+  zoom = Math.max(.45, Math.min(1.8, zoom * Math.exp(-e.deltaY*0.0012)));
+  lastInteract = performance.now(); render();
+},{passive:false});
+
+/* 拆解滑块 */
+const slider = document.getElementById("explode");
+function setExplode(v){
+  slider.value = v;
+  explodeT = v/100;
+  slider.style.setProperty("--fill", v+"%");
+  layout();
+}
+slider.addEventListener("input", ()=>{ lastInteract = performance.now(); setExplode(+slider.value); });
+
+/* 悬浮名牌 */
+const tip = document.getElementById("tip");
+function showTip(text,x,y){ tip.textContent = text; tip.style.display="block"; tip.style.left=x+"px"; tip.style.top=y+"px"; }
+function hideTip(){ tip.style.display="none"; }
+
+/* ================= 音效 ================= */
+let actx = null;
+function beep(freqs, dur=0.12, type="sine", vol=0.12){
+  try{
+    actx ||= new (window.AudioContext||window.webkitAudioContext)();
+    freqs.forEach((f,i)=>{
+      const o = actx.createOscillator(), g = actx.createGain();
+      o.type = type; o.frequency.value = f;
+      g.gain.setValueAtTime(vol, actx.currentTime + i*dur);
+      g.gain.exponentialRampToValueAtTime(.001, actx.currentTime + i*dur + dur);
+      o.connect(g).connect(actx.destination);
+      o.start(actx.currentTime + i*dur); o.stop(actx.currentTime + i*dur + dur);
+    });
+  }catch(e){}
+}
+const sndPick  = ()=>beep([660], .08, "triangle", .08);
+const sndGood  = ()=>beep([523,659,784], .11, "triangle", .12);
+const sndBad   = ()=>beep([220,180], .13, "sawtooth", .07);
+const sndWin   = ()=>beep([523,659,784,1047,1319], .12, "triangle", .12);
+
+/* ================= 探索模式 ================= */
+const card = document.getElementById("card");
+const found = new Set();
+const chipsEl = document.getElementById("chips");
+const chipMap = {};
+PARTS.forEach(p=>{
+  const c = document.createElement("span");
+  c.className = "chip"; c.textContent = p.name; chipMap[p.id] = c;
+  chipsEl.appendChild(c);
+});
+function updateChips(){
+  PARTS.forEach(p=>chipMap[p.id].classList.toggle("found", found.has(p.id)));
+}
+let selected = null;
+function selectComp(id){
+  if(selected) compBoxes[selected].forEach(el=>el.classList.remove("sel"));
+  selected = id;
+  if(id) compBoxes[id].forEach(el=>el.classList.add("sel"));
+}
+function showCard(id){
+  const p = partById[id], i = PARTS.indexOf(p)+1;
+  document.getElementById("c-eyebrow").textContent = "PART 0"+i+" · 已探索 "+found.size+"/8";
+  document.getElementById("c-name").textContent = p.name;
+  document.getElementById("c-en").textContent = p.en;
+  document.getElementById("c-tag").textContent = p.tag;
+  document.getElementById("c-desc").textContent = p.desc;
+  document.getElementById("c-fact").innerHTML = p.fact;
+  card.classList.add("show");
+}
+document.getElementById("card-close").addEventListener("click", ()=>{
+  card.classList.remove("show"); selectComp(null);
+});
+
+/* ================= 挑战模式 ================= */
+let mode = "explore";
+let qOrder = [], qIdx = 0, score = 0, firstTry = true, qLock = false;
+const qClue = document.getElementById("q-clue");
+const qNum = document.getElementById("q-num");
+const qFb = document.getElementById("q-feedback");
+const scoreEl = document.getElementById("score");
+
+function startQuiz(){
+  qOrder = [...QUIZ].sort(()=>Math.random()-.5);
+  qIdx = 0; score = 0; scoreEl.textContent = 0;
+  card.classList.remove("show"); selectComp(null);
+  if(explodeT < .5) setExplode(60);
+  nextQuestion();
+}
+function nextQuestion(){
+  firstTry = true; qLock = false;
+  qNum.textContent = qIdx+1;
+  qClue.textContent = qOrder[qIdx].clue;
+  qFb.textContent = "在 3D 模型里点击你认为正确的零件";
+  qFb.className = "feedback";
+}
+function endQuiz(){
+  sndWin();
+  const r = document.getElementById("result");
+  const [icon,title,msg] =
+    score===8 ? ["🏆","装机大师！","满分！8 个零件你全都认识了，可以去电脑城指点江山了。"] :
+    score>=6 ? ["🎖","硬件高手","非常棒！只差一点点就满分，再挑战一次冲击装机大师吧。"] :
+    score>=4 ? ["🔩","入门玩家","不错的开始！回到探索模式再看看错过的零件，你会更强。"] :
+               ["🔧","学徒上路","没关系，拆开的电脑已经不神秘了——去探索模式认识一下每个零件吧！"];
+  document.getElementById("result-rank").textContent = icon;
+  document.getElementById("result-title").textContent = title;
+  document.getElementById("result-score").textContent = score+" / 8";
+  document.getElementById("result-msg").textContent = msg;
+  r.classList.remove("hide");
+}
+
+/* 点击零件(两种模式共用入口) */
+function onPick(id){
+  lastInteract = performance.now();
+  if(mode === "explore"){
+    sndPick();
+    found.add(id); updateChips();
+    selectComp(id); showCard(id);
+  }else{
+    if(qLock) return;
+    const want = qOrder[qIdx].id;
+    if(id === want){
+      qLock = true;
+      sndGood();
+      compBoxes[id].forEach(el=>{el.classList.remove("good"); void el.offsetWidth; el.classList.add("good");});
+      if(firstTry) { score++; scoreEl.textContent = score; }
+      qFb.textContent = "✓ 答对了！它就是「"+partById[id].name+"」";
+      qFb.className = "feedback ok";
+      qIdx++;
+      setTimeout(()=> qIdx < qOrder.length ? nextQuestion() : endQuiz(), 1100);
+    }else{
+      sndBad(); firstTry = false;
+      compBoxes[id].forEach(el=>{el.classList.remove("bad"); void el.offsetWidth; el.classList.add("bad");});
+      qFb.textContent = "✗ 这是「"+partById[id].name+"」,再想想～";
+      qFb.className = "feedback no";
+    }
+  }
+}
+
+/* 模式切换 */
+const btnE = document.getElementById("btn-explore");
+const btnQ = document.getElementById("btn-quiz");
+function setMode(m){
+  mode = m;
+  document.body.dataset.mode = m;
+  btnE.classList.toggle("on", m==="explore");
+  btnQ.classList.toggle("on", m==="quiz");
+  if(m==="quiz") startQuiz();
+  else { card.classList.remove("show"); selectComp(null); }
+}
+btnE.addEventListener("click", ()=>setMode("explore"));
+btnQ.addEventListener("click", ()=>setMode("quiz"));
+
+/* 开场与结算 */
+document.getElementById("btn-start").addEventListener("click", ()=>{
+  document.getElementById("intro").classList.add("hide");
+  sndPick();
+  // 开场动画:自动缓缓拆开一点
+  if(!reduceMotion){
+    let v = 0;
+    const t = setInterval(()=>{ v += 3; setExplode(v); if(v>=45) clearInterval(t); }, 24);
+  } else setExplode(45);
+});
+document.getElementById("btn-again").addEventListener("click", ()=>{
+  document.getElementById("result").classList.add("hide");
+  startQuiz();
+});
+document.body.dataset.mode = "explore";
+</script>
